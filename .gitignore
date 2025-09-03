@@ -1,7 +1,32 @@
-.venv/
+﻿# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.log
+
+# Virtual envs
+.venv/
+.venv*/
+venv/
+env/
+ENV/
+
+# Data & artifacts
 data/
 runs/
 outputs/
+checkpoints/
+*.pt
+*.onnx
+
+# Jupyter
 .ipynb_checkpoints/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
