@@ -1,4 +1,4 @@
-﻿import argparse, json, os, time
+﻿import argparse, json, os, time, platform, subprocess
 import torch, torchvision
 from torch import nn
 from torch.utils.data import DataLoader
@@ -18,8 +18,7 @@ def reconstruct(meta):
 def count_zeros(model):
     total = 0; zeros = 0
     for p in model.parameters():
-        total += p.numel()
-        zeros += torch.count_nonzero(p==0).item()
+        total += p.numel(); zeros += torch.count_nonzero(p==0).item()
     return 100.0*zeros/total
 
 def main():
@@ -38,20 +37,26 @@ def main():
 
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    det = os.getenv("DET_TORCH", "0") == "1"
+    torch.backends.cudnn.benchmark = not det
+    if det:
+        torch.use_deterministic_algorithms(True)
 
     # Data
     mean=(0.4914,0.4822,0.4465); std=(0.2470,0.2435,0.2616)
     t_train = transforms.Compose([transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip(),
                                   transforms.ToTensor(), transforms.Normalize(mean,std)])
     t_test  = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean,std)])
+    pin = torch.cuda.is_available()
+    pw  = bool(args.num_workers)
     train_set = torchvision.datasets.CIFAR10(root=args.data, train=True,  download=False, transform=t_train)
     test_set  = torchvision.datasets.CIFAR10(root=args.data, train=False, download=False, transform=t_test)
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,  num_workers=args.num_workers)
-    test_loader  = DataLoader(test_set,  batch_size=256,           shuffle=False, num_workers=args.num_workers)
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,  num_workers=args.num_workers, pin_memory=pin, persistent_workers=pw)
+    test_loader  = DataLoader(test_set,  batch_size=256,           shuffle=False, num_workers=args.num_workers, pin_memory=pin, persistent_workers=pw)
 
     # Load baseline
     os.makedirs(args.out, exist_ok=True)
-    ckpt = torch.load(args.checkpoint, map_location="cpu")  # our own file; warning ok
+    ckpt = torch.load(args.checkpoint, map_location="cpu")
     meta = ckpt.get("meta", {"model_name":"resnet18","num_classes":10})
     model = reconstruct(meta)
     model.load_state_dict(ckpt["state_dict"])
@@ -63,18 +68,17 @@ def main():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
             params_to_prune.append((module, "weight"))
     prune.global_unstructured(params_to_prune, pruning_method=prune.L1Unstructured, amount=args.amount)
-
-    # Make pruning permanent (remove reparam buffers)
     for m, _ in params_to_prune:
         prune.remove(m, "weight")
 
     sparsity = count_zeros(model)
     print(f"[PRUNE] target={args.amount*100:.1f}% | observed={sparsity:.2f}% zeros")
 
-    # Fine-tune
+    # Fine-tune (AMP)
     opt = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     loss_fn = nn.CrossEntropyLoss()
+    scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
 
     best_acc = 0.0
     best_path = os.path.join(args.out, "best.pt")
@@ -85,12 +89,14 @@ def main():
         model.train()
         pbar = tqdm(train_loader, desc=f"FT Epoch {epoch}/{args.epochs}", leave=False)
         for x,y in pbar:
-            x,y = x.to(device), y.to(device)
+            x,y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             opt.zero_grad(set_to_none=True)
-            logits = model(x)
-            loss = loss_fn(logits, y)
-            loss.backward()
-            opt.step()
+            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                logits = model(x)
+                loss = loss_fn(logits, y)
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             pbar.set_postfix(loss=f"{loss.item():.3f}", lr=f"{sched.get_last_lr()[0]:.4f}")
         sched.step()
 
@@ -98,7 +104,7 @@ def main():
         model.eval(); correct=0; total=0
         with torch.inference_mode():
             for x,y in test_loader:
-                x,y = x.to(device), y.to(device)
+                x,y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
                 correct += (model(x).argmax(1) == y).sum().item()
                 total += y.numel()
         acc = 100.0*correct/total
@@ -113,13 +119,19 @@ def main():
     # Write metrics
     params_m = sum(p.numel() for p in model.parameters())/1e6
     size_mb = os.path.getsize(best_path)/1e6 if os.path.exists(best_path) else None
+    git_rev = subprocess.getoutput("git rev-parse --short HEAD") or "n/a"
     metrics = {
         "post_prune_observed_sparsity_percent": round(sparsity,2),
         "best_acc_top1": round(best_acc,2),
         "params_millions": round(params_m,3),
         "model_size_mb": round(size_mb,3) if size_mb else None,
         "epochs": args.epochs,
-        "elapsed_sec": round(time.time()-t0,1)
+        "elapsed_sec": round(time.time()-t0,1),
+        "device": device,
+        "torch": torch.__version__,
+        "torch_cuda": getattr(torch.version, "cuda", None),
+        "platform": platform.platform(),
+        "git_commit": git_rev
     }
     with open(os.path.join(args.out,"metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)

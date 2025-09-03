@@ -11,12 +11,10 @@ def reconstruct(meta):
     num = int(meta.get("num_classes", 10))
     if name=="resnet18":
         m = models.resnet18(weights=None)
-        m.fc = nn.Linear(m.fc.in_features, num)
-        return m
+        m.fc = nn.Linear(m.fc.in_features, num); return m
     if name=="mobilenet_v2":
         m = models.mobilenet_v2(weights=None)
-        m.classifier[-1] = nn.Linear(m.classifier[-1].in_features, num)
-        return m
+        m.classifier[-1] = nn.Linear(m.classifier[-1].in_features, num); return m
     raise SystemExit(f"Unknown model {name}")
 
 def measure_latency(model, device="cpu", warmups=20, repeats=100):
@@ -24,22 +22,24 @@ def measure_latency(model, device="cpu", warmups=20, repeats=100):
     x = torch.randn(1,3,32,32, device=device)
     with torch.inference_mode():
         if device == "cuda":
-            for _ in range(warmups):
-                _ = model(x)
+            # precise on-GPU timing
+            starter = torch.cuda.Event(enable_timing=True)
+            ender   = torch.cuda.Event(enable_timing=True)
+            for _ in range(warmups): model(x)
             torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            for _ in range(repeats):
-                _ = model(x)
+            starter.record()
+            for _ in range(repeats): model(x)
+            ender.record()
             torch.cuda.synchronize()
-            dt = (time.perf_counter()-t0)/repeats
+            dt_ms = starter.elapsed_time(ender) / repeats
+            return float(dt_ms)
         else:
-            for _ in range(warmups):
-                _ = model(x)
+            # high-res wall clock for CPU
+            for _ in range(warmups): model(x)
             t0 = time.perf_counter()
-            for _ in range(repeats):
-                _ = model(x)
+            for _ in range(repeats): model(x)
             dt = (time.perf_counter()-t0)/repeats
-    return dt*1000.0  # ms
+            return dt*1000.0
 
 def main():
     ap = argparse.ArgumentParser()
@@ -61,9 +61,9 @@ def main():
             torch.set_num_threads(max(1,args.threads))
 
         if args.verbose: log(f"loading checkpoint: {args.checkpoint}")
+        # Safe enough for our own files; warning can be ignored here
         ckpt = torch.load(args.checkpoint, map_location="cpu")
-        meta = ckpt.get("meta", {})
-        if args.verbose: log(f"meta={meta}")
+        meta = ckpt.get("meta", {"model_name":"resnet18","num_classes":10})
 
         model = reconstruct(meta).to(dev)
         model.load_state_dict(ckpt["state_dict"], strict=True)
