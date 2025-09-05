@@ -1,11 +1,10 @@
+﻿# Minimal human-maintained requirements
+# Install this on new machines, then pin with the lock file below.
 torch
 torchvision
-numpy
-pandas
-matplotlib
 tqdm
+numpy
+matplotlib
+pandas
+# If you use torch-pruning already:
 torch-pruning==1.6.0
-psutil>=5.9
-thop>=0.1.1.post2209072238
-onnx>=1.15
-onnxruntime>=1.18
