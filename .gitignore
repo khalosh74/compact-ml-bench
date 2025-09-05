@@ -30,3 +30,10 @@ checkpoints/
 Thumbs.db
 .vscode/
 .idea/
+# --- env ---
+# --- data (reproducible via scripts/download_data.py) ---
+# --- generated artifacts (reproducible) ---
+# --- caches / temp ---
+*.pyc
+.pytest_cache/
+# --- IDE ---
