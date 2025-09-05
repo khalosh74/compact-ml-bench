@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+# System deps (optional but nice for perf & tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git tini && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+
+# Install CPU wheels for torch/vision from the official index
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+
+# Copy the project
+COPY . /app
+
+# Default command: a tiny smoke test to prove portability
+CMD ["python", "scripts/run.py", "full", "--config", "configs/default.yaml", "--epochs", "2", "--batch", "256"]

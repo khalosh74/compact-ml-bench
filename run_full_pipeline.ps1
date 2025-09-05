@@ -1,29 +1,7 @@
-﻿param(
-  # ---- Core training/bench params ----
-  [int]    $Epochs      = 40,
-  [int]    $Batch       = 1024,
-  [int]    $Workers     = 16,
-  [int]    $Warmup      = 60,
-  [int]    $Repeat      = 600,
-  [string] $Model       = "resnet18",
-  [int]    $Seed        = 42,
-
-  # ---- Run names ----
-  [string] $OutBase     = "baseline_40e",
-  [string] $PrunedName  = "resnet18_struct30",
-
-  # ---- Pruning ----
-  [double] $PruneRatio  = 0.3,
-  [int]    $PruneEpochs = 10,
-
-  # ---- Data ----
-  [string] $Dataset     = "cifar10",
-  [string] $DataDir     = "data",
-
-  # ---- Controls ----
-  [switch] $CleanFirst = $true,     # default: clean artifacts before running
-  [switch] $OpenStreamlit           # optional demo at the end
+param(
+  [string]$Config = "configs/default.yaml"
 )
+python scripts/run.py full --config $Config
 
 function StopIfError($msg){
   if ($LASTEXITCODE -ne 0) {
@@ -94,26 +72,13 @@ python scripts/make_plots.py
 StopIfError "Plot generation failed."
 Get-ChildItem outputs\results.csv, outputs\plot_acc_vs_size.png, outputs\plot_acc_vs_latency.png | Format-Table Name,Length
 
-# 8) Export compact showcase bundle (zip)
-Write-Host "`n[8/10] Bundle outputs and key artifacts for sharing" -ForegroundColor Cyan
-$zip = "showcase_bundle.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-$include = @(
-  "README.md",
-  "outputs\results.csv",
-  "outputs\plot_acc_vs_size.png",
-  "outputs\plot_acc_vs_latency.png",
-  "runs\$OutBase\best.pt",
-  "runs\$PrunedName\structured.ts",
-  "scripts\run_full_pipeline.ps1",
-  "scripts\clean_repo.ps1"
-) | Where-Object { Test-Path $_ }
-if ($include.Count -gt 0) { Compress-Archive -Path $include -DestinationPath $zip -Force; Write-Host "[OK] $zip created" -ForegroundColor Green } else { Write-Host "[WARN] Nothing to zip." -ForegroundColor Yellow }
 
 # 9) Optional: launch Streamlit demo
+ Optional: launch Streamlit demo
 if ($OpenStreamlit -and (Test-Path "demo_app.py")) {
   Write-Host "`n[9/10] Launching Streamlit demo (Ctrl+C to stop)" -ForegroundColor Cyan
   streamlit run demo_app.py -- --checkpoint "runs/$OutBase/best.pt" --ts "runs/$PrunedName/structured.ts"
 }
 
-Write-Host "`n[10/10] DONE ✅  Results in 'outputs' + artifacts in 'runs' + $zip" -ForegroundColor Green
+Write-Host "`n[10/10] DONE ?  Results in 'outputs' + artifacts in 'runs' + $zip" -ForegroundColor Green
+

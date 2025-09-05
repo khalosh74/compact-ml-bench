@@ -1,0 +1,16 @@
+{
+  "name": "compact-ml-bench (CPU)",
+  "build": { "dockerfile": "Dockerfile.cpu", "context": ".." },
+  "workspaceFolder": "/app",
+  "features": { "ghcr.io/devcontainers/features/common-utils:2": {} },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+  "postCreateCommand": "pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu -r requirements.txt"
+}
