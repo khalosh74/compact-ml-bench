@@ -1,4 +1,4 @@
-﻿import argparse, json, os, time, torch
+import argparse, json, os, time, torch
 
 def measure_latency_ts(model, device="cpu", warmups=20, repeats=200):
     model.eval()

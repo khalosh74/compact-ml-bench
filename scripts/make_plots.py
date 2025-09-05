@@ -1,4 +1,4 @@
-﻿import pandas as pd, matplotlib.pyplot as plt
+import pandas as pd, matplotlib.pyplot as plt
 from pathlib import Path
 
 out_dir = Path("outputs"); out_dir.mkdir(exist_ok=True)

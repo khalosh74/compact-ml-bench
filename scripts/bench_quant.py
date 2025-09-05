@@ -1,4 +1,4 @@
-﻿import argparse, json, os, time, torch
+import argparse, json, os, time, torch
 def measure_latency(model, warmups=20, repeats=400):
     model.eval(); x=torch.randn(1,3,32,32)
     with torch.inference_mode():

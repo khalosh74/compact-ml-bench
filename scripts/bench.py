@@ -1,98 +1,138 @@
-﻿import argparse, json, os, sys, time, traceback
+﻿import argparse, json, os, time, sys
+from pathlib import Path
+
 import torch
-from torch import nn
-from torchvision import models
+import torchvision.models as tvm
 
-def log(msg):
-    print(f"[BENCH] {msg}", flush=True)
+def build_model(name: str, num_classes: int):
+    name = (name or "resnet18").lower()
+    if name == "resnet18":
+        m = tvm.resnet18(num_classes=num_classes)
+    elif name == "resnet34":
+        m = tvm.resnet34(num_classes=num_classes)
+    elif name in ("mobilenet_v2","mnv2","mobilenetv2"):
+        m = tvm.mobilenet_v2(num_classes=num_classes)
+    else:
+        raise ValueError(f"Unsupported model_name: {name}")
+    return m
 
-def reconstruct(meta):
-    name = meta.get("model_name","resnet18").lower()
-    num = int(meta.get("num_classes", 10))
-    if name=="resnet18":
-        m = models.resnet18(weights=None)
-        m.fc = nn.Linear(m.fc.in_features, num); return m
-    if name=="mobilenet_v2":
-        m = models.mobilenet_v2(weights=None)
-        m.classifier[-1] = nn.Linear(m.classifier[-1].in_features, num); return m
-    raise SystemExit(f"Unknown model {name}")
-
-def measure_latency(model, device="cpu", warmups=20, repeats=100):
-    model.eval()
-    x = torch.randn(1,3,32,32, device=device)
-    with torch.inference_mode():
-        if device == "cuda":
-            # precise on-GPU timing
-            starter = torch.cuda.Event(enable_timing=True)
-            ender   = torch.cuda.Event(enable_timing=True)
-            for _ in range(warmups): model(x)
-            torch.cuda.synchronize()
-            starter.record()
-            for _ in range(repeats): model(x)
-            ender.record()
-            torch.cuda.synchronize()
-            dt_ms = starter.elapsed_time(ender) / repeats
-            return float(dt_ms)
-        else:
-            # high-res wall clock for CPU
-            for _ in range(warmups): model(x)
-            t0 = time.perf_counter()
-            for _ in range(repeats): model(x)
-            dt = (time.perf_counter()-t0)/repeats
-            return dt*1000.0
+def load_checkpoint(path: str):
+    # Prefer safe loading (weights_only) if available, fall back to standard torch.load
+    try:
+        ckpt = torch.load(path, map_location="cpu", weights_only=True)  # PyTorch >=2.4
+    except TypeError:
+        ckpt = torch.load(path, map_location="cpu")
+    return ckpt
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", required=True)
-    ap.add_argument("--device", default="cpu", choices=["cpu","gpu"])
-    ap.add_argument("--warmup", type=int, default=20)
-    ap.add_argument("--repeat", type=int, default=100)
-    ap.add_argument("--threads", type=int, default=1)
-    ap.add_argument("--out", default="outputs/bench_latest.json")
-    ap.add_argument("--verbose", type=int, default=1)
-    args = ap.parse_args()
+    p = argparse.ArgumentParser("bench")
+    p.add_argument("--checkpoint", required=True, help="Path to .pt/.pth checkpoint (eager PyTorch). Use bench_ts.py for .ts")
+    p.add_argument("--device", default="gpu", choices=["gpu","cuda","cpu"])
+    p.add_argument("--warmup", type=int, default=20)
+    p.add_argument("--repeat", type=int, default=100)
+    p.add_argument("--threads", type=int, default=None, help="CPU only: set torch.set_num_threads")
+    p.add_argument("--out", default="outputs/bench_latest.json")
+    p.add_argument("--verbose", type=int, default=0)
+    args = p.parse_args()
 
+    print("[BENCH] start", flush=True)
+
+    if args.checkpoint.lower().endswith(".ts"):
+        print("[BENCH][ERROR] TorchScript artifact detected. Use scripts/bench_ts.py for .ts models.", flush=True)
+        sys.exit(2)
+
+    dev = "cuda" if args.device in ("gpu","cuda") else "cpu"
+    if dev == "cuda" and not torch.cuda.is_available():
+        print("[BENCH][WARN] CUDA requested but not available; falling back to CPU.", flush=True)
+        dev = "cpu"
+    print(f"[BENCH] requested={args.device} -> using device={dev}", flush=True)
+
+    print(f"[BENCH] loading checkpoint: {args.checkpoint}", flush=True)
+    ckpt = load_checkpoint(args.checkpoint)
+
+    # Resolve state_dict + meta
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+        meta = ckpt.get("meta", {})
+    else:
+        # some trainers save plain state_dict
+        state_dict = ckpt
+        meta = {}
+
+    model_name = meta.get("model_name") or ("resnet18" if any(k.startswith("layer") for k in state_dict.keys()) else "mobilenet_v2")
+    num_classes = int(meta.get("num_classes", 10))
+    if args.verbose:
+        print(f"[BENCH] meta={{'model_name': '{model_name}', 'num_classes': {num_classes}}}", flush=True)
+
+    model = build_model(model_name, num_classes)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if args.verbose:
+        if missing:    print(f"[BENCH][WARN] Missing keys: {len(missing)}", flush=True)
+        if unexpected: print(f"[BENCH][WARN] Unexpected keys: {len(unexpected)}", flush=True)
+
+    model.eval()
+    if dev == "cuda":
+        model.to("cuda")
+        torch.backends.cudnn.benchmark = True
+
+    # CIFAR-10 shape
+    inp = torch.randn(1,3,32,32, device=("cuda" if dev=="cuda" else "cpu"))
+
+    # Params & file size
+    params_m = sum(p.numel() for p in model.parameters()) / 1e6
     try:
-        if args.verbose: log("start")
-        dev = "cuda" if (args.device=="gpu" and torch.cuda.is_available()) else "cpu"
-        if args.verbose: log(f"requested={args.device} -> using device={dev}")
+        size_mb = os.path.getsize(args.checkpoint) / (1024*1024)
+    except OSError:
+        size_mb = None
 
-        if dev=="cpu":
-            torch.set_num_threads(max(1,args.threads))
+    # Warmup
+    with torch.inference_mode():
+        if dev == "cuda":
+            for _ in range(args.warmup):
+                _ = model(inp)
+            torch.cuda.synchronize()
+        else:
+            if args.threads:
+                try: torch.set_num_threads(int(args.threads))
+                except Exception: pass
+            for _ in range(args.warmup):
+                _ = model(inp)
 
-        if args.verbose: log(f"loading checkpoint: {args.checkpoint}")
-        # Safe enough for our own files; warning can be ignored here
-        ckpt = torch.load(args.checkpoint, map_location="cpu")
-        meta = ckpt.get("meta", {"model_name":"resnet18","num_classes":10})
+    # Measure latency (ms/sample, batch=1)
+    if dev == "cuda":
+        start = torch.cuda.Event(enable_timing=True)
+        end   = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        start.record()
+        with torch.inference_mode():
+            for _ in range(args.repeat):
+                _ = model(inp)
+        end.record()
+        torch.cuda.synchronize()
+        total_ms = start.elapsed_time(end)  # ms over repeat
+        latency_ms_b1 = total_ms / args.repeat
+    else:
+        t0 = time.perf_counter()
+        with torch.inference_mode():
+            for _ in range(args.repeat):
+                _ = model(inp)
+        t1 = time.perf_counter()
+        latency_ms_b1 = (t1 - t0) * 1000.0 / args.repeat
 
-        model = reconstruct(meta).to(dev)
-        model.load_state_dict(ckpt["state_dict"], strict=True)
+    out = {
+        "device": "cuda" if dev=="cuda" else "cpu",
+        "latency_ms_b1": round(latency_ms_b1, 3),
+        "params_millions": round(params_m, 3),
+        "model_size_mb": round(size_mb, 3) if size_mb is not None else None,
+        "threads": (int(args.threads) if args.threads else None),
+    }
 
-        params_m = sum(p.numel() for p in model.parameters())/1e6
-        size_mb = os.path.getsize(args.checkpoint)/1e6
-
-        if args.verbose: log("measuring latency...")
-        ms = measure_latency(model, device=dev, warmups=args.warmup, repeats=args.repeat)
-
-        out = {
-            "device": dev,
-            "latency_ms_b1": round(ms,3),
-            "params_millions": round(params_m,3),
-            "model_size_mb": round(size_mb,3),
-            "threads": args.threads if dev=="cpu" else None
-        }
-
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
-        with open(args.out, "w") as f:
-            json.dump(out, f, indent=2)
-        if args.verbose: log(f"wrote {args.out}")
-
-        print(json.dumps(out, indent=2), flush=True)
-        if args.verbose: log("done")
-    except Exception as e:
-        print("[BENCH][ERROR] " + str(e), file=sys.stderr, flush=True)
-        traceback.print_exc()
-        sys.exit(1)
+    Path(os.path.dirname(args.out) or ".").mkdir(parents=True, exist_ok=True)
+    with open(args.out, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"[BENCH] wrote {args.out}", flush=True)
+    print(json.dumps(out, indent=2))
+    print("[BENCH] done", flush=True)
 
 if __name__ == "__main__":
     main()

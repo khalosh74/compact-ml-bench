@@ -1,4 +1,4 @@
-﻿import os, json, csv, glob, re
+import os, json, csv, glob, re
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]

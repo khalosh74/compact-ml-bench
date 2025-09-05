@@ -14,7 +14,7 @@ def make_model(name, num_classes=10):
     raise SystemExit(f"Unknown model: {name}")
 
 def load_ckpt_model(ckpt_path, force_name=None):
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     meta = ckpt.get("meta", {})
     name = force_name or meta.get("model_name","resnet18")
     numc = int(meta.get("num_classes", 10))
@@ -68,7 +68,7 @@ def main():
     student = make_model(args.student, num_classes=10).to(device)
     opt = torch.optim.SGD(student.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
-    scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+    scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
     os.makedirs(args.out, exist_ok=True)
     best_acc, best_path = 0.0, os.path.join(args.out, "best.pt")
@@ -81,7 +81,7 @@ def main():
             opt.zero_grad(set_to_none=True)
             with torch.inference_mode():
                 t_logits = teacher(x)
-            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+            with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
                 s_logits = student(x)
                 loss = kd_loss_fn(s_logits, t_logits, y, T=args.T, alpha=args.alpha)
             scaler.scale(loss).backward()
@@ -116,3 +116,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

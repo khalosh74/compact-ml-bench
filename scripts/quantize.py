@@ -25,7 +25,7 @@ def main():
     args=ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    ckpt=torch.load(args.checkpoint, map_location="cpu")
+    ckpt=torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     meta=ckpt.get("meta", {})
     model_name=(args.model_name or meta.get("model_name") or "resnet18")
     numc=int(meta.get("num_classes",10))
@@ -77,3 +77,4 @@ def main():
     print("[PTQ] Done:", metrics)
 if __name__=="__main__":
     main()
+

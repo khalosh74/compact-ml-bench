@@ -19,7 +19,7 @@ def make_model(name, num_classes=10):
     raise SystemExit(f"Unknown model {name}")
 
 def load_ckpt(ckpt_path):
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     meta = ckpt.get("meta", {"model_name":"resnet18","num_classes":10})
     model = make_model(meta.get("model_name","resnet18"), num_classes=int(meta.get("num_classes",10)))
     model.load_state_dict(ckpt["state_dict"], strict=True)
@@ -146,3 +146,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

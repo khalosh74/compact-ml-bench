@@ -1,4 +1,4 @@
-﻿import os, json, csv
+import os, json, csv
 
 rows=[]
 def add(tag, run_dir, gpu_json=None, cpu_json=None):
@@ -17,7 +17,7 @@ def add(tag, run_dir, gpu_json=None, cpu_json=None):
 
 add("mnv2_baseline", "runs/mnv2_baseline", "outputs/bench_latest.json")
 add("mnv2_distilled", "runs/mnv2_distilled", "outputs/bench_latest.json")
-# PTQ INT8 (CPU-only) — size/acc in runs/mnv2_quant/metrics.json; bench in outputs/bench_mnv2_quant_cpu.json
+# PTQ INT8 (CPU-only) � size/acc in runs/mnv2_quant/metrics.json; bench in outputs/bench_mnv2_quant_cpu.json
 if os.path.exists("runs/mnv2_quant/metrics.json"):
     qm = json.load(open("runs/mnv2_quant/metrics.json"))
     qb = json.load(open("outputs/bench_mnv2_quant_cpu.json"))

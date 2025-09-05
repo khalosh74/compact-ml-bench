@@ -1,4 +1,4 @@
-﻿import os, json, csv, sys
+import os, json, csv, sys
 
 def row_from(tag, run_dir, gpu_json, cpu_json=None):
     m = json.load(open(os.path.join(run_dir,"metrics.json")))

@@ -1,4 +1,4 @@
-﻿import argparse, json, os, time, platform, subprocess
+import argparse, json, os, time, platform, subprocess
 import torch, torchvision
 from torch import nn
 from torch.utils.data import DataLoader
@@ -78,7 +78,7 @@ def main():
     opt = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     loss_fn = nn.CrossEntropyLoss()
-    scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+    scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
     best_acc = 0.0
     best_path = os.path.join(args.out, "best.pt")
@@ -91,7 +91,7 @@ def main():
         for x,y in pbar:
             x,y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             opt.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+            with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
                 logits = model(x)
                 loss = loss_fn(logits, y)
             scaler.scale(loss).backward()

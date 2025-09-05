@@ -1,4 +1,4 @@
-﻿import torch, json
+import torch, json
 print(json.dumps({
   "torch": torch.__version__,
   "runtime_cuda": getattr(torch.version, "cuda", None),
