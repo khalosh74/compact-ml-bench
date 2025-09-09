@@ -1,94 +1,51 @@
-import os
-from pathlib import Path
+﻿#!/usr/bin/env python3
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "outputs"
+OUT = Path("outputs")
 CSV = OUT / "results.csv"
 
-def load_results():
+def main():
     if not CSV.exists():
-        raise FileNotFoundError(f"{CSV} not found. Run summarize.py first.")
-    df = pd.read_csv(CSV)
-    # Normalize expected columns
-    for col in [
-        "model","variant","device","acc_top1","params_millions","size_mb",
-        "b1_ms","ms_std_b1","ms_p50_b1","ms_p90_b1","ms_p99_b1",
-        "img_s_b1","img_s_b8","img_s_b32","img_s_b128",
-        "macs_g_flops","energy_proxy_j","matmul_precision"
-    ]:
-        if col not in df.columns:
-            df[col] = pd.NA
-    # Coerce types
-    num_cols = [
-        "acc_top1","params_millions","size_mb",
-        "b1_ms","ms_std_b1","ms_p50_b1","ms_p90_b1","ms_p99_b1",
-        "img_s_b1","img_s_b8","img_s_b32","img_s_b128",
-        "macs_g_flops","energy_proxy_j"
-    ]
-    for c in num_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    # Derived convenience
-    df["label"] = df[["model","variant","device"]].astype(str).agg("/".join, axis=1)
-    return df
-
-def plot_acc_vs_size(df: pd.DataFrame):
-    fig = plt.figure(figsize=(7,5))
-    sub = df.dropna(subset=["acc_top1","size_mb"])
-    if sub.empty:
-        print("[PLOTS] No rows with acc_top1 & size_mb; skipping acc_vs_size.")
+        print("[PLOTS] results.csv not found. Run summarize.py first.")
         return
-    # One point per (model,variant,device) taking the best acc if duplicates
-    sub = sub.sort_values("acc_top1", ascending=False).drop_duplicates(["model","variant","device"])
-    plt.scatter(sub["size_mb"], sub["acc_top1"])
-    for _, r in sub.iterrows():
-        plt.annotate(r["label"], (r["size_mb"], r["acc_top1"]), fontsize=8, xytext=(3,3), textcoords="offset points")
+    df = pd.read_csv(CSV)
+    req = ["acc_top1","size_mb","b1_ms"]
+    if df[req].isnull().any().any():
+        print("[PLOTS] Some rows missing required fields; plotting only complete rows.")
+    df = df.dropna(subset=req, how="any")
+    if df.empty:
+        note = OUT/"plot_note.txt"
+        note.write_text("No complete rows with acc_top1, size_mb, b1_ms. Run eval + benches.", encoding="utf-8")
+        print(f"[PLOTS] Skipped. See {note}")
+        return
+
+    # Accuracy vs Size
+    plt.figure()
+    for v in sorted(df["variant"].unique()):
+        d = df[df["variant"]==v]
+        plt.scatter(d["size_mb"], d["acc_top1"], label=v)
     plt.xlabel("Model size (MB)")
     plt.ylabel("Top-1 accuracy (%)")
-    plt.title("Accuracy vs Size")
-    plt.grid(True, alpha=0.3)
-    fig.tight_layout()
-    out = OUT / "plot_acc_vs_size.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"[PLOTS] Wrote: {out}")
+    plt.title("Accuracy vs Size (CIFAR-10)")
+    plt.legend(fontsize=8)
+    p1 = OUT/"plot_acc_vs_size.png"
+    plt.savefig(p1, bbox_inches="tight"); plt.close()
+    print(f"[PLOTS] {p1}")
 
-def plot_acc_vs_latency(df: pd.DataFrame):
-    fig = plt.figure(figsize=(7,5))
-    # Use b1_ms (batch=1) as the latency metric. Prefer GPU rows if any; else CPU.
-    gpu = df[(df["device"] == "cuda") & df["b1_ms"].notna() & df["acc_top1"].notna()]
-    cpu = df[(df["device"] == "cpu") & df["b1_ms"].notna() & df["acc_top1"].notna()]
-    if not gpu.empty:
-        sub = gpu
-        dev_label = "GPU"
-    elif not cpu.empty:
-        sub = cpu
-        dev_label = "CPU"
-    else:
-        print("[PLOTS] No rows with acc_top1 & b1_ms; skipping acc_vs_latency.")
-        return
-    # One point per (model,variant) picking best (lowest) latency
-    sub = sub.sort_values("b1_ms", ascending=True).drop_duplicates(["model","variant"])
-    plt.scatter(sub["b1_ms"], sub["acc_top1"])
-    for _, r in sub.iterrows():
-        plt.annotate(r["label"], (r["b1_ms"], r["acc_top1"]), fontsize=8, xytext=(3,3), textcoords="offset points")
-    plt.xlabel(f"Batch-1 latency (ms) [{dev_label}] (lower is better)")
+    # Accuracy vs Latency (b1)
+    plt.figure()
+    for v in sorted(df["variant"].unique()):
+        d = df[df["variant"]==v]
+        plt.scatter(d["b1_ms"], d["acc_top1"], label=v)
+    plt.xlabel("Latency @ batch=1 (ms)")
     plt.ylabel("Top-1 accuracy (%)")
-    plt.title(f"Accuracy vs Latency ({dev_label})")
-    plt.grid(True, alpha=0.3)
-    plt.xscale("log")  # latency often benefits from log scale
-    fig.tight_layout()
-    out = OUT / "plot_acc_vs_latency.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"[PLOTS] Wrote: {out}")
-
-def main():
-    df = load_results()
-    OUT.mkdir(parents=True, exist_ok=True)
-    plot_acc_vs_size(df)
-    plot_acc_vs_latency(df)
+    plt.title("Accuracy vs Latency (b1)")
+    plt.legend(fontsize=8)
+    p2 = OUT/"plot_acc_vs_latency.png"
+    plt.savefig(p2, bbox_inches="tight"); plt.close()
+    print(f"[PLOTS] {p2}")
 
 if __name__ == "__main__":
     main()
