@@ -23,7 +23,7 @@ def _get(d, *keys, default=None):
     return cur
 
 def row_from_bench(path: Path):
-    j = json.load(open(path))
+    j = json.load(open(path, "r", encoding="utf-8-sig"))
     if j.get("schema") != "bench.v2":
         return None
     lat = j.get("latency_ms") or {}
@@ -52,7 +52,7 @@ def row_from_bench(path: Path):
 def attach_accuracy(rows):
     acc_files = {}
     for p in glob.glob(str(OUT / "acc_*.json")):
-        j = json.load(open(p))
+        j = json.load(open(p, "r", encoding="utf-8-sig"))
         key = Path(p).stem.replace("acc_","")
         acc_files[key] = j.get("acc_top1")
     for r in rows:
@@ -77,3 +77,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
