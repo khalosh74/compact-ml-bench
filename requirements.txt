@@ -1,11 +1,7 @@
-﻿# Minimal human-maintained requirements
-# Install this on new machines, then pin with the lock file below.
 torch
 torchvision
 tqdm
-numpy
-matplotlib
 pandas
-torch-pruning==1.6.0
-typer>=0.12
-pyyaml>=6.0
+matplotlib
+streamlit
+numpy

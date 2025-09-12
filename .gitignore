@@ -1,39 +1,15 @@
-﻿# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-*.egg
-*.log
-
-# Virtual envs
-.venv/
-.venv*/
-venv/
-env/
-ENV/
-
-# Data & artifacts
-data/
-runs/
+# outputs & runs
 outputs/
-checkpoints/
-*.pt
-*.onnx
+runs/
 
-# Jupyter
+# data & env
+data/
+.venv/
+
+# caches
+__pycache__/
 .ipynb_checkpoints/
 
-# OS/Editor
+# OS junk
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-# --- env ---
-# --- data (reproducible via scripts/download_data.py) ---
-# --- generated artifacts (reproducible) ---
-# --- caches / temp ---
-*.pyc
-.pytest_cache/
-# --- IDE ---
